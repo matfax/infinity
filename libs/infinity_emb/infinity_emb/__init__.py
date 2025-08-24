@@ -12,7 +12,11 @@ from infinity_emb.infinity_server import create_server  # noqa: E402
 from infinity_emb.log_handler import logger  # noqa: E402
 from infinity_emb.sync_engine import SyncEngineArray  # noqa: E402
 
-__version__: str = importlib.metadata.version("infinity_emb")
+try:
+    __version__: str = importlib.metadata.version("infinity_emb")
+except importlib.metadata.PackageNotFoundError:
+    # Fallback for development/testing when package is not installed
+    __version__ = "0.0.77-dev"
 
 __all__ = [
     "__version__",

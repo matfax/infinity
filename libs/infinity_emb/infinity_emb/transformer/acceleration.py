@@ -8,10 +8,17 @@ from infinity_emb._optional_imports import CHECK_OPTIMUM, CHECK_TORCH, CHECK_TRA
 from infinity_emb.primitives import Device
 
 if CHECK_OPTIMUM.is_available:
-    from optimum.bettertransformer import (  # type: ignore[import-untyped]
-        BetterTransformer,
-        BetterTransformerManager,
-    )
+    try:
+        from optimum.bettertransformer import (  # type: ignore[import-untyped]
+            BetterTransformer,
+            BetterTransformerManager,
+        )
+        _BETTERTRANSFORMER_AVAILABLE = True
+    except (ImportError, RuntimeError) as e:
+        # BetterTransformer is deprecated in optimum v2.0+ or incompatible with current transformers version
+        _BETTERTRANSFORMER_AVAILABLE = False
+        BetterTransformer = None
+        BetterTransformerManager = None
 
 if CHECK_TORCH.is_available:
     import torch
@@ -34,7 +41,10 @@ if TYPE_CHECKING:
 
 def check_if_bettertransformer_possible(engine_args: "EngineArgs") -> bool:
     """verifies if attempting conversion to bettertransformers should be checked."""
-    if not engine_args.bettertransformer:
+    if not engine_args.bettertransformer or not _BETTERTRANSFORMER_AVAILABLE:
+        return False
+
+    if BetterTransformerManager is None:
         return False
 
     config = AutoConfig.from_pretrained(
@@ -47,7 +57,18 @@ def check_if_bettertransformer_possible(engine_args: "EngineArgs") -> bool:
 
 
 def to_bettertransformer(model: "PreTrainedModel", engine_args: "EngineArgs", logger: "Logger"):
-    if not engine_args.bettertransformer:
+    if not engine_args.bettertransformer or not _BETTERTRANSFORMER_AVAILABLE:
+        if engine_args.bettertransformer and not _BETTERTRANSFORMER_AVAILABLE:
+            logger.warning(
+                "BetterTransformer is not available (deprecated in optimum v2.0+ or incompatible transformers version). "
+                "Continue without bettertransformer modeling code."
+            )
+        return model
+
+    if BetterTransformer is None:
+        logger.warning(
+            "BetterTransformer is not available. Continue without bettertransformer modeling code."
+        )
         return model
 
     if engine_args.device == Device.mps or (
