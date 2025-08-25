@@ -101,7 +101,7 @@ mypy-protobuf = "^3.0.0"
 
 [tool.poetry.extras]
 ct2=["ctranslate2","sentence-transformers","torch","transformers"]
-optimum=["optimum","optimum-onnx"]
+optimum=["optimum-onnx"]
 torch=["sentence-transformers","torch"]
 einops=["einops"]
 logging=["rich"]
@@ -124,8 +124,7 @@ all=[
     "ctranslate2",
     "diskcache",
     "einops",
-    "fastapi", 
-    "optimum",
+    "fastapi",
     "optimum-onnx",
     "orjson", 
     "pillow",
