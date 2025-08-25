@@ -67,7 +67,7 @@ amd:
         && python -m pip install -e .; \
     elif [ "$GPU_ARCH" = "gfx1100" ]; then \
         # OPTION2: Install onnxruntime-rocm from the wheel
-        . .venv/bin/activate && python -m pip uninstall onnxruntime onnxruntime-rocm -y && python -m pip install "numpy<2" https://repo.radeon.com/rocm/manylinux/rocm-rel-6.2.3/onnxruntime_rocm-1.18.0-cp310-cp310-linux_x86_64.whl \
+        . .venv/bin/activate && python -m pip uninstall onnxruntime onnxruntime-rocm -y && python -m pip install https://repo.radeon.com/rocm/manylinux/rocm-rel-6.2.3/onnxruntime_rocm-1.18.0-cp310-cp310-linux_x86_64.whl \
         && python -m pip install /install/*.whl \
         && git clone https://github.com/huggingface/optimum-amd.git /tmp-optimum \
         && cd /tmp-optimum \
