@@ -60,13 +60,27 @@ def device_to_onnx(device: Device) -> str:
             return "ROCMExecutionProvider"
         elif "MIGraphXExecutionProvider" in available:
             return "MIGraphXExecutionProvider"
-        return "CUDAExecutionProvider"
+        elif "CUDAExecutionProvider" in available:
+            return "CUDAExecutionProvider"
+        else:
+            raise ValueError("No CUDA execution provider available")
     elif device == Device.mps:
         return "CoreMLExecutionProvider"
     elif device == Device.tensorrt:
-        return "TensorrtExecutionProvider"
+        # Prefer the new RTX EP if available, otherwise legacy TensorRT, then CUDA/CPU
+        if "NvTensorRTRTXExecutionProvider" in available:
+            return "NvTensorRTRTXExecutionProvider"
+        elif "TensorrtExecutionProvider" in available:
+            return "TensorrtExecutionProvider"
+        elif "CUDAExecutionProvider" in available:
+            return "CUDAExecutionProvider"
+        else:
+            raise ValueError("No TensorRT execution provider available")
     elif device is None or device == Device.auto:
-        if "TensorrtExecutionProvider" in available:
+        # Priority: NvTensorRTRTXExecutionProvider -> CUDAExecutionProvider -> legacy TensorRT -> others -> CPU
+        if "NvTensorRTRTXExecutionProvider" in available:
+            return "NvTensorRTRTXExecutionProvider"
+        elif "TensorrtExecutionProvider" in available:
             return "TensorrtExecutionProvider"
         elif "CUDAExecutionProvider" in available:
             return "CUDAExecutionProvider"
@@ -107,14 +121,17 @@ def optimize_model(
     """
 
     ## If there is no need for optimization
-    if execution_provider == "TensorrtExecutionProvider":
-        return model_class.from_pretrained(
-            model_name_or_path,
+    if execution_provider in {"TensorrtExecutionProvider", "NvTensorRTRTXExecutionProvider"}:
+        _kwargs = dict(
+            model_name_or_path=model_name_or_path,
             revision=revision,
             trust_remote_code=trust_remote_code,
             provider=execution_provider,
             file_name=file_name,
-            provider_options={
+        )
+        # Only apply TensorRT-specific options to the legacy TensorRT EP
+        if execution_provider == "TensorrtExecutionProvider":
+            _kwargs["provider_options"] = {
                 "trt_fp16_enable": True,
                 "trt_layer_norm_fp32_fallback": True,
                 "trt_cuda_graph_enable": True,  # helps small layers
@@ -122,8 +139,12 @@ def optimize_model(
                 # int8, not working, needs calibration table.
                 # "trt_int8_use_native_calibration_table": True,
                 # "trt_int8_enable": "quantize" in file_name,
-            },
-        )
+            }
+        else:
+            _kwargs["provider_options"] = {
+                "enable_cuda_graph": True,
+            }
+        return model_class.from_pretrained(**_kwargs)
 
     elif execution_provider in ["ROCMExecutionProvider", "MIGraphXExecutionProvider"]:
         CHECK_OPTIMUM_AMD.mark_required()
@@ -162,7 +183,7 @@ def optimize_model(
         provider=execution_provider,
         file_name=file_name,
     )
-    if not optimize_model or execution_provider == "TensorrtExecutionProvider":
+    if not optimize_model or execution_provider in {"TensorrtExecutionProvider", "NvTensorRTRTXExecutionProvider"}:
         return unoptimized_model
     try:
         logger.info("Optimizing model")

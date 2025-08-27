@@ -132,8 +132,9 @@ The cache path inside the docker container is set by the environment variable `H
   **This image is currently not build via CI/CD (to large), consider pinning to exact version.**
 
   This image has support for:
+  - ONNX-RTX "NvTensorRTRTXExecutionProvider" (preferred when available)
   - ONNX-Cuda "CudaExecutionProvider" 
-  - ONNX-TensorRT "TensorRTExecutionProvider" (may not always work due to version mismatch with ORT)
+  - ONNX-TensorRT "TensorRTExecutionProvider" (legacy; may not always work due to version mismatch with ORT)
   - CudaExtensions and packages, e.g. Tri-Dao's `pip install flash-attn` package when using Pytorch.
   - nvcc compiler support
   
@@ -148,6 +149,9 @@ The cache path inside the docker container is set by the environment variable `H
   --model-id $model1 \
   --port $port
   ```
+
+  Notes:
+  - When `--engine optimum` is used with device `cuda` or `tensorrt`, the runtime will prefer `NvTensorRTRTXExecutionProvider` if present, otherwise fall back to `CUDAExecutionProvider`, and finally to `CPUExecutionProvider`.
 </details>
 
 #### Using local models with Docker container
