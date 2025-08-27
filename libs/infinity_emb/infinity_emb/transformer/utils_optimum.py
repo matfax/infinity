@@ -123,8 +123,7 @@ def optimize_model(
     ## If there is no need for optimization
     if execution_provider in {"TensorrtExecutionProvider", "NvTensorRTRTXExecutionProvider"}:
         _kwargs = dict(
-            model_id=model_name_or_path,
-            model_name_or_path=model_name_or_path,
+            model_id=model_name_or_path, # Might require model_name_or_path=model_name_or_path for TensorrtExecutionProvider or older versions
             revision=revision,
             trust_remote_code=trust_remote_code,
             provider=execution_provider,
