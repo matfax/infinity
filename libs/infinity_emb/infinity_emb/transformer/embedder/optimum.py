@@ -17,7 +17,6 @@ from infinity_emb.transformer.utils_optimum import (
     get_onnx_files,
     mean_pooling,
     normalize,
-    prepare_ort_inputs,
     optimize_model,
 )
 
@@ -115,6 +114,16 @@ class OptimumEmbedder(BaseEmbedder):
         )
         self.model.use_io_binding = False
 
+        # Cache ONNX input names to avoid passing unexpected feeds
+        self._input_names: set[str] = set()
+        try:
+            session = getattr(self.model, "model", None)
+            if session is not None and hasattr(session, "get_inputs"):
+                self._input_names = {i.name for i in session.get_inputs()}
+        except Exception:
+            # Best-effort; we'll lazily refresh in encode_core if needed
+            self._input_names = set()
+
     def encode_pre(self, sentences: list[str]) -> dict[str, np.ndarray]:
         encoded = self.tokenizer(
             sentences,
@@ -125,14 +134,42 @@ class OptimumEmbedder(BaseEmbedder):
             return_token_type_ids=False,
             pad_to_multiple_of=8,
         )
-        # Normalize types and ensure position_ids are present for ORT
-        return prepare_ort_inputs(encoded)
+
+        # Ensure explicit int64 bindings for TensorRT/ORT and always provide position_ids
+        input_ids = encoded["input_ids"].astype(np.int64, copy=False)
+        attention_mask = encoded["attention_mask"].astype(np.int64, copy=False)
+
+        if "position_ids" in encoded:
+            position_ids = encoded["position_ids"].astype(np.int64, copy=False)
+        else:
+            batch, seqlen = input_ids.shape
+            # Broadcast [0..seqlen-1] for each batch, ensure a real array (not a view)
+            position_ids = np.broadcast_to(
+                np.arange(seqlen, dtype=np.int64), (batch, seqlen)
+            ).copy()
+
+        return {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "position_ids": position_ids,
+        }
 
     def encode_core(self, onnx_input: dict[str, np.ndarray]) -> dict:
-        outputs = self.model(**onnx_input)
+        # Lazily determine allowed input names if not already cached
+        if not self._input_names:
+            try:
+                session = getattr(self.model, "model", None)
+                if session is not None and hasattr(session, "get_inputs"):
+                    self._input_names = {i.name for i in session.get_inputs()}
+            except Exception:
+                self._input_names = set(onnx_input.keys())
+
+        filtered = {k: v for k, v in onnx_input.items() if not self._input_names or k in self._input_names}
+
+        outputs = self.model(**filtered)
         return {
             "token_embeddings": outputs["last_hidden_state"],
-            "attention_mask": onnx_input["attention_mask"],
+            "attention_mask": filtered["attention_mask"],
         }
 
     @quant_embedding_decorator()
