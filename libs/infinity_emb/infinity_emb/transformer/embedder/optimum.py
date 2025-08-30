@@ -21,6 +21,7 @@ from infinity_emb.transformer.utils_optimum import (
     normalize,
     optimize_model,
 )
+from infinity_emb.log_handler import logger
 
 if CHECK_ONNXRUNTIME.is_available:
     try:
@@ -60,17 +61,19 @@ class OptimumEmbedder(BaseEmbedder):
             use_auth_token=True,
             prefer_quantized=("cpu" in provider.lower() or "openvino" in provider.lower()),
         )
-        # Optionally patch ONNX so position_ids is declared as INT64 (needed by TensorRT)
-        onnx_file = self._maybe_patch_position_ids_to_int64(onnx_file)
+    # Optionally patch ONNX so position_ids is declared as INT64 (needed by TensorRT)
+    onnx_file = self._maybe_patch_position_ids_to_int64(onnx_file)
 
         # If we have a local (possibly patched) ONNX file path, prefer loading from its directory
         if onnx_file.is_absolute() or onnx_file.exists():
             model_id_for_load = onnx_file.parent.as_posix()
             file_name_for_load = onnx_file.name
-        else:
+    else:
             # Fall back to repo id + repo-relative path
             model_id_for_load = engine_args.model_name_or_path
             file_name_for_load = onnx_file.as_posix()
+
+    logger.info(f"[infinity] ONNX load path: dir={model_id_for_load} file={file_name_for_load}")
 
         self.pooling = (
             mean_pooling if engine_args.pooling_method == PoolingMethod.mean else cls_token_pooling
@@ -156,6 +159,7 @@ class OptimumEmbedder(BaseEmbedder):
         try:
             # Ensure we have a local file; if not, snapshot the repo so external data exists
             local_path = onnx_path
+            snapshot_dir: Path | None = None
             if not local_path.exists():
                 try:
                     from huggingface_hub import snapshot_download  # type: ignore
@@ -175,19 +179,26 @@ class OptimumEmbedder(BaseEmbedder):
                         # Fallback: search by filename within snapshot
                         matches = list(snapshot_dir.rglob(onnx_path.name))
                         if not matches:
-                            print(
+                            logger.warning(
                                 f"[infinity] Could not inspect/patch ONNX ({onnx_path.name}): not found in snapshot"
                             )
                             return onnx_path
                         local_path = matches[-1]
-                except Exception as _:
+                except Exception:
                     # Couldn't resolve locally; skip patching
-                    print(
+                    logger.warning(
                         f"[infinity] Could not inspect/patch ONNX ({onnx_path.name}): not found locally and download failed"
                     )
                     return onnx_path
 
-            model = onnx.load(local_path.as_posix())
+            if snapshot_dir is not None:
+                logger.info(f"[infinity] ONNX snapshot dir: {snapshot_dir}")
+
+            # Load model with external data when present
+            try:
+                model = onnx.load_model(local_path.as_posix(), load_external_data=True)
+            except Exception:
+                model = onnx.load(local_path.as_posix())
             pos_inp = None
             for vi in model.graph.input:
                 if vi.name == "position_ids":
@@ -212,17 +223,22 @@ class OptimumEmbedder(BaseEmbedder):
             # Patch input dtype to INT64 and write to a sibling file
             pos_inp.type.tensor_type.elem_type = TensorProto.INT64
             patched = local_path.with_suffix(".int64.onnx")
-            # Save patched model; external data references are preserved
+            # Save patched model; include external data in a single sidecar file
             try:
-                from onnx import save_model  # type: ignore
-
-                save_model(model, patched.as_posix())
+                onnx.save_model(
+                    model,
+                    patched.as_posix(),
+                    save_as_external_data=True,
+                    all_tensors_to_one_file=True,
+                    location=patched.name + "_data",
+                    size_threshold=1024,
+                )
             except Exception:
                 onnx.save(model, patched.as_posix())
-            print(f"[infinity] Patched ONNX: set position_ids to INT64 -> {patched.name}")
+            logger.info(f"[infinity] Patched ONNX saved at: {patched}")
             return patched
         except Exception as e:
-            print(f"[infinity] Could not inspect/patch ONNX ({onnx_path.name}): {e}")
+            logger.warning(f"[infinity] Could not inspect/patch ONNX ({onnx_path.name}): {e}")
             return onnx_path
 
     def encode_pre(self, sentences: list[str]) -> dict[str, np.ndarray]:
