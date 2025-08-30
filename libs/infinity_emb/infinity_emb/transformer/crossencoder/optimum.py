@@ -71,8 +71,8 @@ class OptimumCrossEncoder(BaseCrossEncoder):
             return_tensors="np",
             return_token_type_ids=False,
         )
-    # Ensure int64 and generate position_ids for ORT
-    return prepare_ort_inputs(encoded)
+        # Ensure int64 and generate position_ids for ORT
+        return prepare_ort_inputs(encoded)
 
     def encode_core(self, features: dict[str, np.ndarray]) -> np.ndarray:
         outputs = self.model(**features, return_dict=True)

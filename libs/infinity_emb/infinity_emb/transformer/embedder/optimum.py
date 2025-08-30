@@ -84,8 +84,8 @@ class OptimumEmbedder(BaseEmbedder):
             truncation="longest_first",
             return_tensors="np",
         )
-    # Normalize types and ensure position_ids are present for ORT
-    return prepare_ort_inputs(encoded)
+        # Normalize types and ensure position_ids are present for ORT
+        return prepare_ort_inputs(encoded)
 
     def encode_core(self, onnx_input: dict[str, np.ndarray]) -> dict:
         outputs = self.model(**onnx_input)
