@@ -61,19 +61,19 @@ class OptimumEmbedder(BaseEmbedder):
             use_auth_token=True,
             prefer_quantized=("cpu" in provider.lower() or "openvino" in provider.lower()),
         )
-    # Optionally patch ONNX so position_ids is declared as INT64 (needed by TensorRT)
-    onnx_file = self._maybe_patch_position_ids_to_int64(onnx_file)
+        # Optionally patch ONNX so position_ids is declared as INT64 (needed by TensorRT)
+        onnx_file = self._maybe_patch_position_ids_to_int64(onnx_file)
 
         # If we have a local (possibly patched) ONNX file path, prefer loading from its directory
         if onnx_file.is_absolute() or onnx_file.exists():
             model_id_for_load = onnx_file.parent.as_posix()
             file_name_for_load = onnx_file.name
-    else:
+        else:
             # Fall back to repo id + repo-relative path
             model_id_for_load = engine_args.model_name_or_path
             file_name_for_load = onnx_file.as_posix()
 
-    logger.info(f"[infinity] ONNX load path: dir={model_id_for_load} file={file_name_for_load}")
+        logger.info(f"[infinity] ONNX load path: dir={model_id_for_load} file={file_name_for_load}")
 
         self.pooling = (
             mean_pooling if engine_args.pooling_method == PoolingMethod.mean else cls_token_pooling
@@ -159,7 +159,7 @@ class OptimumEmbedder(BaseEmbedder):
         try:
             # Ensure we have a local file; if not, snapshot the repo so external data exists
             local_path = onnx_path
-            snapshot_dir: Path | None = None
+            snapshot_dir: Optional[Path] = None
             if not local_path.exists():
                 try:
                     from huggingface_hub import snapshot_download  # type: ignore
