@@ -31,25 +31,7 @@ class OptimumCrossEncoder(BaseCrossEncoder):
         CHECK_ONNXRUNTIME.mark_required()
         provider = device_to_onnx(engine_args.device)
 
-        onnx_file = get_onnx_files(
-            model_name_or_path=engine_args.model_name_or_path,
-            revision=engine_args.revision,
-            use_auth_token=True,
-            prefer_quantized=("cpu" in provider.lower() or "openvino" in provider.lower()),
-        )
-
-        self.model = optimize_model(
-            engine_args.model_name_or_path,
-            execution_provider=provider,
-            file_name=onnx_file.as_posix(),
-            optimize_model=not os.environ.get(
-                "INFINITY_ONNX_DISABLE_OPTIMIZE", False
-            ),  # TODO: make this env variable public
-            model_class=ORTModelForSequenceClassification,
-            revision=engine_args.revision,
-            trust_remote_code=engine_args.trust_remote_code,
-        )
-        self.model.use_io_binding = False
+        # Prepare tokenizer/config first so we can shape TensorRT dynamic profiles
         self.tokenizer = AutoTokenizer.from_pretrained(
             engine_args.model_name_or_path,
             revision=engine_args.revision,
@@ -62,6 +44,65 @@ class OptimumCrossEncoder(BaseCrossEncoder):
         )
         self._infinity_tokenizer = copy.deepcopy(self.tokenizer)
 
+        onnx_file = get_onnx_files(
+            model_name_or_path=engine_args.model_name_or_path,
+            revision=engine_args.revision,
+            use_auth_token=True,
+            prefer_quantized=("cpu" in provider.lower() or "openvino" in provider.lower()),
+        )
+
+        provider_options = None
+        if "tensorrt" in provider.lower():
+            # Define dynamic shape profiles for TensorRT to avoid 0/32767 defaults
+            max_seq = int(os.getenv("INFINITY_TRT_MAX_SEQ_LEN", self.config.max_position_embeddings))
+            max_bs = int(os.getenv("INFINITY_TRT_MAX_BATCH", 16))
+            opt_seq = int(os.getenv("INFINITY_TRT_OPT_SEQ_LEN", min(256, max_seq)))
+            opt_bs = int(os.getenv("INFINITY_TRT_OPT_BATCH", min(8, max_bs)))
+            min_seq = int(os.getenv("INFINITY_TRT_MIN_SEQ_LEN", 1))
+            min_bs = int(os.getenv("INFINITY_TRT_MIN_BATCH", 1))
+
+            def shape_str(bs: int, seqlen: int) -> str:
+                return ",".join(
+                    [
+                        f"input_ids:{bs}x{seqlen}",
+                        f"attention_mask:{bs}x{seqlen}",
+                        f"position_ids:{bs}x{seqlen}",
+                    ]
+                )
+
+            min_shapes = shape_str(min_bs, min_seq)
+            opt_shapes = shape_str(opt_bs, opt_seq)
+            max_shapes = shape_str(max_bs, max_seq)
+
+            if provider == "NvTensorRTRTXExecutionProvider":
+                provider_options = {
+                    "nv_profile_min_shapes": min_shapes,
+                    "nv_profile_opt_shapes": opt_shapes,
+                    "nv_profile_max_shapes": max_shapes,
+                    "enable_cuda_graph": True,
+                }
+            else:
+                provider_options = {
+                    "trt_profile_min_shapes": min_shapes,
+                    "trt_profile_opt_shapes": opt_shapes,
+                    "trt_profile_max_shapes": max_shapes,
+                    # keep other sensible defaults in optimize_model
+                }
+
+        self.model = optimize_model(
+            engine_args.model_name_or_path,
+            execution_provider=provider,
+            file_name=onnx_file.as_posix(),
+            optimize_model=not os.environ.get(
+                "INFINITY_ONNX_DISABLE_OPTIMIZE", False
+            ),  # TODO: make this env variable public
+            model_class=ORTModelForSequenceClassification,
+            revision=engine_args.revision,
+            trust_remote_code=engine_args.trust_remote_code,
+            provider_options=provider_options,
+        )
+        self.model.use_io_binding = False
+
     def encode_pre(self, queries_docs: list[tuple[str, str]]) -> dict[str, np.ndarray]:
         encoded = self.tokenizer(
             queries_docs,
@@ -70,6 +111,7 @@ class OptimumCrossEncoder(BaseCrossEncoder):
             truncation="longest_first",
             return_tensors="np",
             return_token_type_ids=False,
+            pad_to_multiple_of=8,
         )
         # Ensure int64 and generate position_ids for ORT
         return prepare_ort_inputs(encoded)

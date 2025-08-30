@@ -2,7 +2,7 @@
 # Copyright (c) 2023-now michaelfeil
 
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional, Union, Any
 
 import numpy as np
 from huggingface_hub import HfApi, HfFolder  # type: ignore
@@ -158,6 +158,7 @@ def optimize_model(
     optimize_model=False,
     revision: Optional[str] = None,
     trust_remote_code: bool = True,
+    provider_options: Optional[dict[str, Any]] = None,
 ) -> "OptimizedModel":
     """
     Optimizes, and then loads the model to work best with the execution provider.
@@ -175,27 +176,31 @@ def optimize_model(
     ## If there is no need for optimization
     if execution_provider in {"TensorrtExecutionProvider", "NvTensorRTRTXExecutionProvider"}:
         _kwargs = dict(
-            model_id=model_name_or_path, # Might require model_name_or_path=model_name_or_path for TensorrtExecutionProvider or older versions
+            model_id=model_name_or_path,  # Might require model_name_or_path=model_name_or_path for some versions
             revision=revision,
             trust_remote_code=trust_remote_code,
             provider=execution_provider,
             file_name=file_name,
         )
-        # Only apply TensorRT-specific options to the legacy TensorRT EP
+        # Default provider options, caller can override/extend via provider_options
         if execution_provider == "TensorrtExecutionProvider":
-            _kwargs["provider_options"] = {
+            base_opts: dict[str, Any] = {
                 "trt_fp16_enable": True,
                 "trt_layer_norm_fp32_fallback": True,
                 "trt_cuda_graph_enable": True,  # helps small layers
                 "trt_builder_optimization_level": 3,  # select between 3-5
-                # int8, not working, needs calibration table.
-                # "trt_int8_use_native_calibration_table": True,
-                # "trt_int8_enable": "quantize" in file_name,
+                # Engine caching (safe defaults)
+                "trt_engine_cache_enable": True,
+                "trt_engine_cache_path": (Path.home() / ".cache" / "infinity_trt_engines").as_posix(),
             }
         else:
-            _kwargs["provider_options"] = {
+            # NvTensorRTRTXExecutionProvider
+            base_opts = {
                 "enable_cuda_graph": True,
             }
+        if provider_options:
+            base_opts.update(provider_options)
+        _kwargs["provider_options"] = base_opts
         return model_class.from_pretrained(**_kwargs)
 
     elif execution_provider in ["ROCMExecutionProvider", "MIGraphXExecutionProvider"]:
