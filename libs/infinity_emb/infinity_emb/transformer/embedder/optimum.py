@@ -154,18 +154,32 @@ class OptimumEmbedder(BaseEmbedder):
             return onnx_path
 
         try:
-            # Ensure we have a local file; if not, try to download from Hub
+            # Ensure we have a local file; if not, snapshot the repo so external data exists
             local_path = onnx_path
             if not local_path.exists():
                 try:
-                    from huggingface_hub import hf_hub_download  # type: ignore
+                    from huggingface_hub import snapshot_download  # type: ignore
 
-                    local_str = hf_hub_download(
-                        repo_id=self.engine_args.model_name_or_path,
-                        filename=onnx_path.as_posix(),
-                        revision=self.engine_args.revision,
+                    snapshot_dir = Path(
+                        snapshot_download(
+                            repo_id=self.engine_args.model_name_or_path,
+                            revision=self.engine_args.revision,
+                            allow_patterns=["*.onnx", "*.onnx_data", "**/*.onnx", "**/*.onnx_data"],
+                        )
                     )
-                    local_path = Path(local_str)
+                    # Try exact relative path first
+                    candidate = snapshot_dir / onnx_path.as_posix()
+                    if candidate.exists():
+                        local_path = candidate
+                    else:
+                        # Fallback: search by filename within snapshot
+                        matches = list(snapshot_dir.rglob(onnx_path.name))
+                        if not matches:
+                            print(
+                                f"[infinity] Could not inspect/patch ONNX ({onnx_path.name}): not found in snapshot"
+                            )
+                            return onnx_path
+                        local_path = matches[-1]
                 except Exception as _:
                     # Couldn't resolve locally; skip patching
                     print(
@@ -198,7 +212,13 @@ class OptimumEmbedder(BaseEmbedder):
             # Patch input dtype to INT64 and write to a sibling file
             pos_inp.type.tensor_type.elem_type = TensorProto.INT64
             patched = local_path.with_suffix(".int64.onnx")
-            onnx.save(model, patched.as_posix())
+            # Save patched model; external data references are preserved
+            try:
+                from onnx import save_model  # type: ignore
+
+                save_model(model, patched.as_posix())
+            except Exception:
+                onnx.save(model, patched.as_posix())
             print(f"[infinity] Patched ONNX: set position_ids to INT64 -> {patched.name}")
             return patched
         except Exception as e:
