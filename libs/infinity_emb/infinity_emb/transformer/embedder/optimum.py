@@ -5,6 +5,7 @@ import copy
 import os
 
 import numpy as np
+from pathlib import Path
 
 from infinity_emb._optional_imports import CHECK_ONNXRUNTIME, CHECK_TRANSFORMERS
 from infinity_emb.args import EngineArgs
@@ -58,6 +59,8 @@ class OptimumEmbedder(BaseEmbedder):
             use_auth_token=True,
             prefer_quantized=("cpu" in provider.lower() or "openvino" in provider.lower()),
         )
+        # Optionally patch ONNX so position_ids is declared as INT64 (needed by TensorRT)
+        onnx_file = self._maybe_patch_position_ids_to_int64(onnx_file)
 
         self.pooling = (
             mean_pooling if engine_args.pooling_method == PoolingMethod.mean else cls_token_pooling
@@ -115,14 +118,63 @@ class OptimumEmbedder(BaseEmbedder):
         self.model.use_io_binding = False
 
         # Cache ONNX input names to avoid passing unexpected feeds
-        self._input_names: set[str] = set()
+        self._input_names = set()
         try:
             session = getattr(self.model, "model", None)
             if session is not None and hasattr(session, "get_inputs"):
                 self._input_names = {i.name for i in session.get_inputs()}
+                # One-time visibility: print input dtypes for troubleshooting
+                try:
+                    dtypes = {i.name: getattr(i, "type", "") for i in session.get_inputs()}
+                    print(f"[infinity] ONNX inputs: {dtypes}")
+                except Exception:
+                    pass
         except Exception:
             # Best-effort; we'll lazily refresh in encode_core if needed
             self._input_names = set()
+
+    def _maybe_patch_position_ids_to_int64(self, onnx_path: Path) -> Path:
+        """If ONNX declares position_ids not as INT64, optionally patch it.
+        Enable via env INFINITY_PATCH_ONNX_POSITION_IDS=1/true/yes.
+        """
+        try:
+            import onnx  # type: ignore
+            from onnx import TensorProto  # type: ignore
+        except Exception:
+            return onnx_path
+
+        try:
+            model = onnx.load(onnx_path.as_posix())
+            pos_inp = None
+            for vi in model.graph.input:
+                if vi.name == "position_ids":
+                    pos_inp = vi
+                    break
+            if pos_inp is None:
+                return onnx_path
+
+            elem = pos_inp.type.tensor_type.elem_type
+            if elem == TensorProto.INT64:
+                return onnx_path
+
+            do_patch = os.getenv("INFINITY_PATCH_ONNX_POSITION_IDS", "0").lower() in ("1", "true", "yes")
+            if not do_patch:
+                print(
+                    "[infinity] WARNING: ONNX input 'position_ids' is not INT64. "
+                    "TensorRT may warn. Set INFINITY_PATCH_ONNX_POSITION_IDS=1 to write a patched copy, "
+                    "or re-export the model with INT64 position_ids."
+                )
+                return onnx_path
+
+            # Patch input dtype to INT64 and write to a sibling file
+            pos_inp.type.tensor_type.elem_type = TensorProto.INT64
+            patched = onnx_path.with_suffix(".int64.onnx")
+            onnx.save(model, patched.as_posix())
+            print(f"[infinity] Patched ONNX: set position_ids to INT64 -> {patched.name}")
+            return patched
+        except Exception as e:
+            print(f"[infinity] Could not inspect/patch ONNX ({onnx_path.name}): {e}")
+            return onnx_path
 
     def encode_pre(self, sentences: list[str]) -> dict[str, np.ndarray]:
         encoded = self.tokenizer(
