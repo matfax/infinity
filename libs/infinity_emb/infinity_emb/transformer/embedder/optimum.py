@@ -17,6 +17,7 @@ from infinity_emb.transformer.utils_optimum import (
     get_onnx_files,
     mean_pooling,
     normalize,
+    prepare_ort_inputs,
     optimize_model,
 )
 
@@ -83,9 +84,8 @@ class OptimumEmbedder(BaseEmbedder):
             truncation="longest_first",
             return_tensors="np",
         )
-        # int64 is required for onnxruntime on Windows
-        encoded = {k: v.astype(np.int64) for k, v in encoded.items()}
-        return encoded
+    # Normalize types and ensure position_ids are present for ORT
+    return prepare_ort_inputs(encoded)
 
     def encode_core(self, onnx_input: dict[str, np.ndarray]) -> dict:
         outputs = self.model(**onnx_input)

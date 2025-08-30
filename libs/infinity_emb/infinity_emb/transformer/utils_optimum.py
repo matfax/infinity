@@ -47,6 +47,58 @@ def normalize(input_array, p=2, dim=1, eps=1e-12):
     return normalized_array
 
 
+def prepare_ort_inputs(features: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+    """Ensure inputs match ORT expectations and supply missing position_ids.
+
+    Behavior:
+    - Cast input_ids and attention_mask to int64
+    - If position_ids missing, create it as int64 using:
+        - With attention_mask: cumsum(-1) - 1, then clip at 0
+        - Without attention_mask: arange(seq_len) broadcast to batch
+    - Leaves any other keys unchanged
+
+    Returns a shallow-copied dict you can pass directly to the ORT model.
+    """
+    out: dict[str, np.ndarray] = dict(features)
+
+    input_ids = out.get("input_ids")
+    attention_mask = out.get("attention_mask")
+    position_ids = out.get("position_ids")
+
+    if input_ids is not None:
+        input_ids = np.asarray(input_ids, dtype=np.int64)
+        out["input_ids"] = input_ids
+
+    if attention_mask is not None:
+        attention_mask = np.asarray(attention_mask, dtype=np.int64)
+        out["attention_mask"] = attention_mask
+
+    # Only (re)generate when missing
+    if position_ids is None and input_ids is not None:
+        if attention_mask is not None:
+            # position_ids = attention_mask.cumsum(-1) - 1; clip at 0
+            position_ids = attention_mask.cumsum(axis=-1) - 1
+            position_ids = np.clip(position_ids, 0, None).astype(np.int64, copy=False)
+        else:
+            # Fallback to simple range per sequence
+            if input_ids.ndim != 2:
+                raise ValueError(
+                    f"Expected input_ids to be 2D (batch, seq_len), got shape {input_ids.shape}"
+                )
+            batch, seq_len = input_ids.shape
+            base = np.arange(seq_len, dtype=np.int64)[None, :]
+            # Repeat along batch dimension without tiling data unnecessarily
+            position_ids = np.broadcast_to(base, (batch, seq_len)).copy()
+
+        out["position_ids"] = position_ids
+
+    # Ensure dtype for existing position_ids if it was provided
+    elif position_ids is not None:
+        out["position_ids"] = np.asarray(position_ids, dtype=np.int64)
+
+    return out
+
+
 def device_to_onnx(device: Device) -> str:
     CHECK_ONNXRUNTIME.mark_required()
     available = ort.get_available_providers()

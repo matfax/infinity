@@ -12,6 +12,7 @@ from infinity_emb.transformer.abstract import BaseCrossEncoder
 from infinity_emb.transformer.utils_optimum import (
     device_to_onnx,
     get_onnx_files,
+    prepare_ort_inputs,
     optimize_model,
 )
 
@@ -70,9 +71,8 @@ class OptimumCrossEncoder(BaseCrossEncoder):
             return_tensors="np",
             return_token_type_ids=False,
         )
-        # Windows requires int64
-        encoded = {k: v.astype(np.int64) for k, v in encoded.items()}
-        return encoded
+    # Ensure int64 and generate position_ids for ORT
+    return prepare_ort_inputs(encoded)
 
     def encode_core(self, features: dict[str, np.ndarray]) -> np.ndarray:
         outputs = self.model(**features, return_dict=True)
