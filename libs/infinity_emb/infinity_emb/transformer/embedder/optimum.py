@@ -138,8 +138,8 @@ class OptimumEmbedder(BaseEmbedder):
                 self._input_names = {i.name for i in session.get_inputs()}
                 # One-time visibility: print input dtypes for troubleshooting
                 try:
-                    dtypes = {i.name: getattr(i, "type", "") for i in session.get_inputs()}
-                    print(f"[infinity] ONNX inputs: {dtypes}")
+                    dtypes = {i.name: i.type for i in session.get_inputs()}
+                    logger.info(f"[infinity] ONNX inputs: {dtypes}")
                 except Exception:
                     pass
         except Exception:
@@ -147,7 +147,7 @@ class OptimumEmbedder(BaseEmbedder):
             self._input_names = set()
 
     def _maybe_patch_position_ids_to_int64(self, onnx_path: Path) -> Path:
-        """If ONNX declares position_ids not as INT64, optionally patch it.
+        """If ONNX declares input_ids, attention_mask, or position_ids not as INT64, optionally patch them.
         Enable via env INFINITY_PATCH_ONNX_POSITION_IDS=1/true/yes.
         """
         try:
@@ -199,29 +199,37 @@ class OptimumEmbedder(BaseEmbedder):
                 model = onnx.load_model(local_path.as_posix(), load_external_data=True)
             except Exception:
                 model = onnx.load(local_path.as_posix())
-            pos_inp = None
+            
+            # Check all three critical inputs that need INT64 binding
+            inputs_to_patch = ["input_ids", "attention_mask", "position_ids"]
+            patched_inputs = []
+            inputs_found = {}
+            
             for vi in model.graph.input:
-                if vi.name == "position_ids":
-                    pos_inp = vi
-                    break
-            if pos_inp is None:
-                return local_path
+                if vi.name in inputs_to_patch:
+                    inputs_found[vi.name] = vi
+                    elem = vi.type.tensor_type.elem_type
+                    if elem != TensorProto.INT64:
+                        patched_inputs.append(vi.name)
 
-            elem = pos_inp.type.tensor_type.elem_type
-            if elem == TensorProto.INT64:
+            if not patched_inputs:
                 return local_path
 
             do_patch = os.getenv("INFINITY_PATCH_ONNX_POSITION_IDS", "0").lower() in ("1", "true", "yes")
             if not do_patch:
                 print(
-                    "[infinity] WARNING: ONNX input 'position_ids' is not INT64. "
+                    f"[infinity] WARNING: ONNX inputs {patched_inputs} are not INT64. "
                     "TensorRT may warn. Set INFINITY_PATCH_ONNX_POSITION_IDS=1 to write a patched copy, "
-                    "or re-export the model with INT64 position_ids."
+                    "or re-export the model with INT64 input types."
                 )
                 return local_path
 
-            # Patch input dtype to INT64 and write to a sibling file
-            pos_inp.type.tensor_type.elem_type = TensorProto.INT64
+            # Patch input dtypes to INT64 and write to a sibling file
+            for input_name in patched_inputs:
+                if input_name in inputs_found:
+                    inputs_found[input_name].type.tensor_type.elem_type = TensorProto.INT64
+                    logger.info(f"[infinity] Patching {input_name} to INT64")
+            
             patched = local_path.with_suffix(".int64.onnx")
             # Save patched model; include external data in a single sidecar file
             try:
@@ -282,6 +290,11 @@ class OptimumEmbedder(BaseEmbedder):
                 self._input_names = set(onnx_input.keys())
 
         filtered = {k: v for k, v in onnx_input.items() if not self._input_names or k in self._input_names}
+        
+        # Debug: Log what data types we're actually sending
+        if logger.isEnabledFor(10):  # DEBUG level
+            input_dtypes = {k: str(v.dtype) for k, v in filtered.items()}
+            logger.debug(f"[infinity] Sending ONNX inputs with dtypes: {input_dtypes}")
 
         outputs = self.model(**filtered)
         return {
