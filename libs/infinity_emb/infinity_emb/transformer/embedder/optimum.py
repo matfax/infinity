@@ -6,6 +6,7 @@ import os
 
 import numpy as np
 from pathlib import Path
+from typing import Optional
 
 from infinity_emb._optional_imports import CHECK_ONNXRUNTIME, CHECK_TRANSFORMERS
 from infinity_emb.args import EngineArgs
@@ -62,6 +63,15 @@ class OptimumEmbedder(BaseEmbedder):
         # Optionally patch ONNX so position_ids is declared as INT64 (needed by TensorRT)
         onnx_file = self._maybe_patch_position_ids_to_int64(onnx_file)
 
+        # If we have a local (possibly patched) ONNX file path, prefer loading from its directory
+        if onnx_file.is_absolute() or onnx_file.exists():
+            model_id_for_load = onnx_file.parent.as_posix()
+            file_name_for_load = onnx_file.name
+        else:
+            # Fall back to repo id + repo-relative path
+            model_id_for_load = engine_args.model_name_or_path
+            file_name_for_load = onnx_file.as_posix()
+
         self.pooling = (
             mean_pooling if engine_args.pooling_method == PoolingMethod.mean else cls_token_pooling
         )
@@ -104,11 +114,11 @@ class OptimumEmbedder(BaseEmbedder):
                 }
 
         self.model = optimize_model(
-            model_name_or_path=engine_args.model_name_or_path,
+            model_name_or_path=model_id_for_load,
             revision=engine_args.revision,
             trust_remote_code=engine_args.trust_remote_code,
             execution_provider=provider,
-            file_name=onnx_file.as_posix(),
+            file_name=file_name_for_load,
             optimize_model=not os.environ.get(
                 "INFINITY_ONNX_DISABLE_OPTIMIZE", False
             ),  # TODO: make this env variable public
@@ -144,18 +154,37 @@ class OptimumEmbedder(BaseEmbedder):
             return onnx_path
 
         try:
-            model = onnx.load(onnx_path.as_posix())
+            # Ensure we have a local file; if not, try to download from Hub
+            local_path = onnx_path
+            if not local_path.exists():
+                try:
+                    from huggingface_hub import hf_hub_download  # type: ignore
+
+                    local_str = hf_hub_download(
+                        repo_id=self.engine_args.model_name_or_path,
+                        filename=onnx_path.as_posix(),
+                        revision=self.engine_args.revision,
+                    )
+                    local_path = Path(local_str)
+                except Exception as _:
+                    # Couldn't resolve locally; skip patching
+                    print(
+                        f"[infinity] Could not inspect/patch ONNX ({onnx_path.name}): not found locally and download failed"
+                    )
+                    return onnx_path
+
+            model = onnx.load(local_path.as_posix())
             pos_inp = None
             for vi in model.graph.input:
                 if vi.name == "position_ids":
                     pos_inp = vi
                     break
             if pos_inp is None:
-                return onnx_path
+                return local_path
 
             elem = pos_inp.type.tensor_type.elem_type
             if elem == TensorProto.INT64:
-                return onnx_path
+                return local_path
 
             do_patch = os.getenv("INFINITY_PATCH_ONNX_POSITION_IDS", "0").lower() in ("1", "true", "yes")
             if not do_patch:
@@ -164,11 +193,11 @@ class OptimumEmbedder(BaseEmbedder):
                     "TensorRT may warn. Set INFINITY_PATCH_ONNX_POSITION_IDS=1 to write a patched copy, "
                     "or re-export the model with INT64 position_ids."
                 )
-                return onnx_path
+                return local_path
 
             # Patch input dtype to INT64 and write to a sibling file
             pos_inp.type.tensor_type.elem_type = TensorProto.INT64
-            patched = onnx_path.with_suffix(".int64.onnx")
+            patched = local_path.with_suffix(".int64.onnx")
             onnx.save(model, patched.as_posix())
             print(f"[infinity] Patched ONNX: set position_ids to INT64 -> {patched.name}")
             return patched
