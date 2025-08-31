@@ -195,6 +195,8 @@ class OptimumEmbedder(BaseEmbedder):
             if snapshot_dir is not None:
                 logger.info(f"[infinity] ONNX snapshot dir: {snapshot_dir}")
 
+            logger.info(f"[infinity] Inspecting ONNX file for INT64 bindings: {local_path}")
+
             # Load model with external data when present
             try:
                 model = onnx.load_model(local_path.as_posix(), load_external_data=True)
@@ -210,13 +212,18 @@ class OptimumEmbedder(BaseEmbedder):
                 if vi.name in inputs_to_patch:
                     inputs_found[vi.name] = vi
                     elem = vi.type.tensor_type.elem_type
+                    logger.info(f"[infinity] Found input {vi.name} with type {elem} (INT64={TensorProto.INT64})")
                     if elem != TensorProto.INT64:
                         patched_inputs.append(vi.name)
 
+            logger.info(f"[infinity] Inputs needing INT64 patching: {patched_inputs}")
+
             if not patched_inputs:
+                logger.info(f"[infinity] No inputs need patching, all are already INT64")
                 return local_path
 
             do_patch = os.getenv("INFINITY_PATCH_ONNX_POSITION_IDS", "0").lower() in ("1", "true", "yes")
+            logger.info(f"[infinity] INFINITY_PATCH_ONNX_POSITION_IDS={os.getenv('INFINITY_PATCH_ONNX_POSITION_IDS', '0')}, do_patch={do_patch}")
             if not do_patch:
                 print(
                     f"[infinity] WARNING: ONNX inputs {patched_inputs} are not INT64. "

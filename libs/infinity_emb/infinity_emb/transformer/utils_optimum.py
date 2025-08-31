@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2023-now michaelfeil
 
+import os
 from pathlib import Path
 from typing import Optional, Union, Any
 
@@ -184,14 +185,18 @@ def optimize_model(
         )
         # Default provider options, caller can override/extend via provider_options
         if execution_provider == "TensorrtExecutionProvider":
+            # Check if ONNX patching is enabled - if so, modify cache path to avoid conflicts
+            patch_enabled = os.getenv("INFINITY_PATCH_ONNX_POSITION_IDS", "0").lower() in ("1", "true", "yes")
+            cache_suffix = "_int64_patched" if patch_enabled else ""
+            
             base_opts: dict[str, Any] = {
                 "trt_fp16_enable": True,
                 "trt_layer_norm_fp32_fallback": True,
                 "trt_cuda_graph_enable": True,  # helps small layers
                 "trt_builder_optimization_level": 3,  # select between 3-5
-                # Engine caching (safe defaults)
+                # Engine caching (safe defaults) - use separate cache for patched models
                 "trt_engine_cache_enable": True,
-                "trt_engine_cache_path": (Path.home() / ".cache" / "infinity_trt_engines").as_posix(),
+                "trt_engine_cache_path": (Path.home() / ".cache" / f"infinity_trt_engines{cache_suffix}").as_posix(),
             }
         else:
             # NvTensorRTRTXExecutionProvider
