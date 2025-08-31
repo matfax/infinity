@@ -204,10 +204,26 @@ class OptimumEmbedder(BaseEmbedder):
             logger.info(f"[infinity] Inspecting ONNX file for INT64 bindings: {local_path}")
 
             # Load model with external data when present
+            has_external_data = False
             try:
-                model = onnx.load_model(local_path.as_posix(), load_external_data=True)
-            except Exception:
-                model = onnx.load(local_path.as_posix())
+                # Check if external data files exist
+                onnx_data_files = list(local_path.parent.glob(f"{local_path.stem}*.onnx_data")) + \
+                                 list(local_path.parent.glob(f"{local_path.stem}_data"))
+                has_external_data = len(onnx_data_files) > 0
+                
+                if has_external_data:
+                    logger.info(f"[infinity] External data detected: {[f.name for f in onnx_data_files]}")
+                    model = onnx.load_model(local_path.as_posix(), load_external_data=True)
+                else:
+                    model = onnx.load(local_path.as_posix())
+            except Exception as e:
+                logger.warning(f"[infinity] Failed to load model with external data: {e}, trying without")
+                try:
+                    model = onnx.load(local_path.as_posix())
+                    has_external_data = False
+                except Exception as e2:
+                    logger.error(f"[infinity] Failed to load ONNX model: {e2}")
+                    return local_path
             
             # Check all three critical inputs that need INT64 binding
             inputs_to_patch = ["input_ids", "attention_mask", "position_ids"]
@@ -259,27 +275,39 @@ class OptimumEmbedder(BaseEmbedder):
                     inputs_found[input_name].type.tensor_type.elem_type = TensorProto.INT64
                     logger.info(f"[infinity] Patching {input_name} to INT64")
             
-            # Save patched model; try without external data first for TensorRT RTX compatibility
+            # Save patched model - prefer external data for large models to avoid corruption
             try:
-                # First try: save everything in the main file (no external data)
-                onnx.save(model, patched.as_posix())
-                logger.info(f"[infinity] Patched ONNX saved (no external data) at: {patched}")
-            except Exception as e1:
-                logger.warning(f"[infinity] Failed to save without external data: {e1}")
-                try:
-                    # Fallback: use external data
+                if has_external_data:
+                    # Original model uses external data, so patched model should too
+                    logger.info(f"[infinity] Original model uses external data, saving patched model with external data")
                     onnx.save_model(
                         model,
                         patched.as_posix(),
                         save_as_external_data=True,
                         all_tensors_to_one_file=True,
-                        location=patched.name + "_data",
+                        location=f"{patched.stem}.onnx_data",
                         size_threshold=1024,
                     )
                     logger.info(f"[infinity] Patched ONNX saved (with external data) at: {patched}")
-                except Exception as e2:
-                    logger.error(f"[infinity] Failed to save patched ONNX: {e2}")
-                    return local_path
+                else:
+                    # Try without external data for smaller models
+                    try:
+                        onnx.save(model, patched.as_posix())
+                        logger.info(f"[infinity] Patched ONNX saved (no external data) at: {patched}")
+                    except Exception as e1:
+                        logger.warning(f"[infinity] Failed to save without external data: {e1}, trying with external data")
+                        onnx.save_model(
+                            model,
+                            patched.as_posix(),
+                            save_as_external_data=True,
+                            all_tensors_to_one_file=True,
+                            location=f"{patched.stem}.onnx_data",
+                            size_threshold=1024,
+                        )
+                        logger.info(f"[infinity] Patched ONNX saved (with external data) at: {patched}")
+            except Exception as e:
+                logger.error(f"[infinity] Failed to save patched ONNX: {e}")
+                return local_path
             return patched
         except Exception as e:
             logger.warning(f"[infinity] Could not inspect/patch ONNX ({onnx_path.name}): {e}")
