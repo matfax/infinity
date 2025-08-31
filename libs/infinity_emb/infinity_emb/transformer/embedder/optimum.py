@@ -156,6 +156,8 @@ class OptimumEmbedder(BaseEmbedder):
     def _maybe_patch_position_ids_to_int64(self, onnx_path: Path) -> Path:
         """If ONNX declares input_ids, attention_mask, or position_ids not as INT64, optionally patch them.
         Enable via env INFINITY_PATCH_ONNX_POSITION_IDS=1/true/yes.
+        
+        If a patched INT64 version already exists, prioritize it over the original.
         """
         try:
             import onnx  # type: ignore
@@ -164,13 +166,56 @@ class OptimumEmbedder(BaseEmbedder):
             return onnx_path
 
         try:
-            # Ensure we have a local file; if not, snapshot the repo so external data exists
+            # First, try to resolve the local cache path without downloading
             local_path = onnx_path
             snapshot_dir: Optional[Path] = None
-            if not local_path.exists():
+            
+            # Check if we already have the model cached locally
+            try:
+                from huggingface_hub import snapshot_download  # type: ignore
+                from huggingface_hub.constants import HUGGINGFACE_HUB_CACHE  # type: ignore
+                
+                # Try to find existing cache without downloading
+                cache_dir = Path(HUGGINGFACE_HUB_CACHE)
+                model_cache_pattern = f"models--{self.engine_args.model_name_or_path.replace('/', '--')}"
+                existing_cache_dirs = list(cache_dir.glob(model_cache_pattern))
+                
+                if existing_cache_dirs:
+                    # Look for the right snapshot directory
+                    cache_model_dir = existing_cache_dirs[0]
+                    snapshot_dirs = list(cache_model_dir.glob("snapshots/*"))
+                    if snapshot_dirs:
+                        # Use the most recent snapshot (or specific revision if available)
+                        snapshot_dir = snapshot_dirs[-1]  # Use latest by default
+                        if self.engine_args.revision:
+                            # Try to find specific revision
+                            for sdir in snapshot_dirs:
+                                if sdir.name.startswith(self.engine_args.revision[:8]):
+                                    snapshot_dir = sdir
+                                    break
+                        
+                        # Try to find the ONNX file in the cache
+                        candidate = snapshot_dir / onnx_path.as_posix()
+                        if candidate.exists():
+                            local_path = candidate
+                            logger.info(f"[infinity] Using cached ONNX file: {local_path}")
+                        else:
+                            # Try searching by filename
+                            matches = list(snapshot_dir.rglob(onnx_path.name))
+                            if matches:
+                                local_path = matches[0]
+                                logger.info(f"[infinity] Found cached ONNX file: {local_path}")
+                            else:
+                                raise FileNotFoundError("ONNX file not in cache")
+                    else:
+                        raise FileNotFoundError("No snapshots in cache")
+                else:
+                    raise FileNotFoundError("Model not in cache")
+                    
+            except (ImportError, FileNotFoundError, Exception):
+                # Cache miss or error - need to download
+                logger.info(f"[infinity] Model not in cache, downloading...")
                 try:
-                    from huggingface_hub import snapshot_download  # type: ignore
-
                     snapshot_dir = Path(
                         snapshot_download(
                             repo_id=self.engine_args.model_name_or_path,
@@ -200,6 +245,12 @@ class OptimumEmbedder(BaseEmbedder):
 
             if snapshot_dir is not None:
                 logger.info(f"[infinity] ONNX snapshot dir: {snapshot_dir}")
+
+            # Check if patched file already exists and prefer it
+            patched = local_path.with_suffix(".int64.onnx")
+            if patched.exists():
+                logger.info(f"[infinity] Found existing patched ONNX, using it: {patched}")
+                return patched
 
             logger.info(f"[infinity] Inspecting ONNX file for INT64 bindings: {local_path}")
 
@@ -262,12 +313,6 @@ class OptimumEmbedder(BaseEmbedder):
                     "or re-export the model with INT64 input types for input_ids, attention_mask, and position_ids."
                 )
                 return local_path
-
-            # Check if patched file already exists
-            patched = local_path.with_suffix(".int64.onnx")
-            if patched.exists():
-                logger.info(f"[infinity] Using existing patched ONNX: {patched}")
-                return patched
 
             # Patch input dtypes to INT64 and write to a sibling file
             for input_name in patched_inputs:
