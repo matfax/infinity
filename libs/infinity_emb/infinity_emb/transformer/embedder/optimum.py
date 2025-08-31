@@ -63,7 +63,13 @@ class OptimumEmbedder(BaseEmbedder):
             prefer_quantized=("cpu" in provider.lower() or "openvino" in provider.lower()),
         )
         # Optionally patch ONNX so position_ids is declared as INT64 (needed by TensorRT)
+        original_onnx_file = onnx_file
         onnx_file = self._maybe_patch_position_ids_to_int64(onnx_file)
+        
+        if onnx_file != original_onnx_file:
+            logger.info(f"[infinity] Using patched ONNX file: {onnx_file}")
+        else:
+            logger.info(f"[infinity] Using original ONNX file (no patching needed or disabled): {onnx_file}")
 
         # If we have a local (possibly patched) ONNX file path, prefer loading from its directory
         if onnx_file.is_absolute() or onnx_file.exists():
@@ -218,9 +224,18 @@ class OptimumEmbedder(BaseEmbedder):
 
             logger.info(f"[infinity] Inputs needing INT64 patching: {patched_inputs}")
 
-            if not patched_inputs:
+            # Check if forced patching is enabled (for debugging)
+            force_patch = os.getenv("INFINITY_FORCE_PATCH_ONNX", "0").lower() in ("1", "true", "yes")
+            
+            if not patched_inputs and not force_patch:
                 logger.info(f"[infinity] No inputs need patching, all are already INT64")
                 return local_path
+            elif force_patch:
+                logger.info(f"[infinity] Force patching enabled, will patch even if inputs appear to be INT64")
+                # Add all inputs to patching list when force patching
+                for input_name in inputs_to_patch:
+                    if input_name in inputs_found and input_name not in patched_inputs:
+                        patched_inputs.append(input_name)
 
             do_patch = os.getenv("INFINITY_PATCH_ONNX_POSITION_IDS", "0").lower() in ("1", "true", "yes")
             logger.info(f"[infinity] INFINITY_PATCH_ONNX_POSITION_IDS={os.getenv('INFINITY_PATCH_ONNX_POSITION_IDS', '0')}, do_patch={do_patch}")
