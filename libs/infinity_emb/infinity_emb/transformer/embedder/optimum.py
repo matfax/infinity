@@ -20,6 +20,7 @@ from infinity_emb.transformer.utils_optimum import (
     mean_pooling,
     normalize,
     optimize_model,
+    prepare_ort_inputs,
 )
 from infinity_emb.log_handler import logger
 
@@ -219,10 +220,16 @@ class OptimumEmbedder(BaseEmbedder):
             if not do_patch:
                 print(
                     f"[infinity] WARNING: ONNX inputs {patched_inputs} are not INT64. "
-                    "TensorRT may warn. Set INFINITY_PATCH_ONNX_POSITION_IDS=1 to write a patched copy, "
-                    "or re-export the model with INT64 input types."
+                    "TensorRT/ORT may warn about input binding types. Set INFINITY_PATCH_ONNX_POSITION_IDS=1 to write a patched copy, "
+                    "or re-export the model with INT64 input types for input_ids, attention_mask, and position_ids."
                 )
                 return local_path
+
+            # Check if patched file already exists
+            patched = local_path.with_suffix(".int64.onnx")
+            if patched.exists():
+                logger.info(f"[infinity] Using existing patched ONNX: {patched}")
+                return patched
 
             # Patch input dtypes to INT64 and write to a sibling file
             for input_name in patched_inputs:
@@ -230,7 +237,6 @@ class OptimumEmbedder(BaseEmbedder):
                     inputs_found[input_name].type.tensor_type.elem_type = TensorProto.INT64
                     logger.info(f"[infinity] Patching {input_name} to INT64")
             
-            patched = local_path.with_suffix(".int64.onnx")
             # Save patched model; include external data in a single sidecar file
             try:
                 onnx.save_model(
@@ -260,24 +266,8 @@ class OptimumEmbedder(BaseEmbedder):
             pad_to_multiple_of=8,
         )
 
-        # Ensure explicit int64 bindings for TensorRT/ORT and always provide position_ids
-        input_ids = encoded["input_ids"].astype(np.int64, copy=False)
-        attention_mask = encoded["attention_mask"].astype(np.int64, copy=False)
-
-        if "position_ids" in encoded:
-            position_ids = encoded["position_ids"].astype(np.int64, copy=False)
-        else:
-            batch, seqlen = input_ids.shape
-            # Broadcast [0..seqlen-1] for each batch, ensure a real array (not a view)
-            position_ids = np.broadcast_to(
-                np.arange(seqlen, dtype=np.int64), (batch, seqlen)
-            ).copy()
-
-        return {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "position_ids": position_ids,
-        }
+        # Use centralized function to ensure all inputs have proper int64 bindings
+        return prepare_ort_inputs(encoded)
 
     def encode_core(self, onnx_input: dict[str, np.ndarray]) -> dict:
         # Lazily determine allowed input names if not already cached
