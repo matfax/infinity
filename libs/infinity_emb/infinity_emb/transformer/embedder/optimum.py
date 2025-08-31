@@ -259,19 +259,27 @@ class OptimumEmbedder(BaseEmbedder):
                     inputs_found[input_name].type.tensor_type.elem_type = TensorProto.INT64
                     logger.info(f"[infinity] Patching {input_name} to INT64")
             
-            # Save patched model; include external data in a single sidecar file
+            # Save patched model; try without external data first for TensorRT RTX compatibility
             try:
-                onnx.save_model(
-                    model,
-                    patched.as_posix(),
-                    save_as_external_data=True,
-                    all_tensors_to_one_file=True,
-                    location=patched.name + "_data",
-                    size_threshold=1024,
-                )
-            except Exception:
+                # First try: save everything in the main file (no external data)
                 onnx.save(model, patched.as_posix())
-            logger.info(f"[infinity] Patched ONNX saved at: {patched}")
+                logger.info(f"[infinity] Patched ONNX saved (no external data) at: {patched}")
+            except Exception as e1:
+                logger.warning(f"[infinity] Failed to save without external data: {e1}")
+                try:
+                    # Fallback: use external data
+                    onnx.save_model(
+                        model,
+                        patched.as_posix(),
+                        save_as_external_data=True,
+                        all_tensors_to_one_file=True,
+                        location=patched.name + "_data",
+                        size_threshold=1024,
+                    )
+                    logger.info(f"[infinity] Patched ONNX saved (with external data) at: {patched}")
+                except Exception as e2:
+                    logger.error(f"[infinity] Failed to save patched ONNX: {e2}")
+                    return local_path
             return patched
         except Exception as e:
             logger.warning(f"[infinity] Could not inspect/patch ONNX ({onnx_path.name}): {e}")
