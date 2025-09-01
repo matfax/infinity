@@ -43,9 +43,17 @@ def cls_token_pooling(model_output, *args):
 def normalize(input_array, p=2, dim=1, eps=1e-12):
     # Calculate the Lp norm along the specified dimension
     norm = np.linalg.norm(input_array, ord=p, axis=dim, keepdims=True)
-    # Handle edge cases: replace NaN/inf norms and avoid division by zero
-    norm = np.where(np.isfinite(norm) & (norm > eps), norm, eps)
-    normalized_array = input_array / norm
+    
+    # Use np.divide with where parameter to handle division safely
+    # Where norm > eps: perform normal division
+    # Where norm <= eps: return zero vector (mathematically correct for zero-norm inputs)
+    normalized_array = np.divide(
+        input_array, 
+        norm, 
+        out=np.zeros_like(input_array),  # output zeros when division is invalid
+        where=(norm > eps)  # only divide where norm is sufficiently large
+    )
+    
     return normalized_array
 
 
