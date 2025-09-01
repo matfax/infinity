@@ -206,10 +206,12 @@ def optimize_model(
             base_opts = {
                 "enable_cuda_graph": True,
                 # Engine caching for RTX provider - must use relative paths
-                "engine_cache_path": ".cache/engines",
-                "engine_cache_prefix": "infinity_trt-rtx_",
+                "nv_engine_cache_enable": True,
+                "nv_engine_cache_path": ".cache/engines",
+                "nv_engine_cache_prefix": "infinity_trt-rtx_",
                 # Timing cache for faster builds - must use relative paths
-                "timing_cache_path": ".cache/timing",
+                "nv_timing_cache_enable": True,
+                "nv_timing_cache_path": ".cache/timing",
             }
         if provider_options:
             base_opts.update(provider_options)
