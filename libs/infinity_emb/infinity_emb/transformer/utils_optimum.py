@@ -195,6 +195,10 @@ def optimize_model(
                 "trt_engine_cache_enable": True,
                 # Additional optimizations for faster startup
                 "trt_timing_cache_enable": True,
+                "trt_engine_cache_path": "cache/engines",
+                "trt_timing_cache_path": "cache/timing",
+                "trt_cache_prefix": "infinity_trt_",
+                "trt_weight_stripped_engine_enable": True,
             }
         else:
             # NvTensorRTRTXExecutionProvider
@@ -203,12 +207,10 @@ def optimize_model(
                 "enable_cuda_graph": True,
                 # Engine caching for RTX provider - must use relative paths
                 "engine_cache_path": "cache/engines",
-                "engine_cache_prefix": "infinity_",
+                "engine_cache_prefix": "infinity_trt-rtx_",
                 # Timing cache for faster builds - must use relative paths
                 "timing_cache_path": "cache/timing",
-                # Additional optimizations
-                "enable_build_heuristics": True,
-                "weight_stripped_engine_enable": True,
+                "trt_weight_stripped_engine_enable": True,
             }
         if provider_options:
             base_opts.update(provider_options)
