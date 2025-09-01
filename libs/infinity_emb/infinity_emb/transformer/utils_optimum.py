@@ -193,13 +193,23 @@ def optimize_model(
             file_name=file_name,
         )
         # Default provider options, caller can override/extend via provider_options
+        # Get optimization level from environment variable (default to 3, valid range 1-5)
+        optimization_level = int(os.getenv("INFINITY_TENSORRT_OPTIMIZATION_LEVEL", "3"))
+        optimization_level = max(1, min(5, optimization_level))  # Clamp to valid range
+        
+        # Get CUDA graph setting from environment variable (default to True)
+        cuda_graph_enable = os.getenv("INFINITY_TENSORRT_CUDA_GRAPH", "true").lower() in ("true", "1", "yes", "on")
+        
+        # Get weight stripping setting from environment variable (default to True)
+        weight_stripped_enable = os.getenv("INFINITY_TENSORRT_WEIGHT_STRIPPED", "true").lower() in ("true", "1", "yes", "on")
+        
         if execution_provider == "TensorrtExecutionProvider":
             
             base_opts: dict[str, Any] = {
                 "trt_fp16_enable": True,
                 "trt_layer_norm_fp32_fallback": True,
-                "trt_cuda_graph_enable": True,  # helps small layers
-                "trt_builder_optimization_level": 3,  # select between 3-5
+                "trt_cuda_graph_enable": cuda_graph_enable,  # configurable via env var
+                "trt_builder_optimization_level": optimization_level,  # configurable via env var
                 # Enhanced engine caching
                 "trt_engine_cache_enable": True,
                 # Additional optimizations for faster startup
@@ -207,13 +217,15 @@ def optimize_model(
                 "trt_engine_cache_path": ".cache/engines",
                 "trt_timing_cache_path": ".cache/timing",
                 "trt_cache_prefix": "infinity_trt_",
-                "trt_weight_stripped_engine_enable": True,
+                "trt_weight_stripped_engine_enable": weight_stripped_enable,  # configurable via env var
             }
         else:
             # NvTensorRTRTXExecutionProvider
             # Note: paths must be relative for security (absolute paths are rejected)
             base_opts = {
-                "enable_cuda_graph": True,
+                "enable_cuda_graph": cuda_graph_enable,  # configurable via env var
+                # Builder optimization level - configurable via env var
+                "nv_builder_optimization_level": optimization_level,
                 # Engine caching for RTX provider - must use relative paths
                 "nv_engine_cache_enable": True,
                 "nv_engine_cache_path": "/app/.cache/engines",
@@ -222,7 +234,7 @@ def optimize_model(
                 "nv_timing_cache_enable": True,
                 "nv_timing_cache_path": "/app/.cache/timing",
                 # Weight stripping for RTX provider (folder-based loading)
-                "nv_weight_stripped_engine_enable": True,
+                "nv_weight_stripped_engine_enable": weight_stripped_enable,  # configurable via env var
             }
         if provider_options:
             base_opts.update(provider_options)
