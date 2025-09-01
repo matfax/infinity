@@ -185,23 +185,30 @@ def optimize_model(
         )
         # Default provider options, caller can override/extend via provider_options
         if execution_provider == "TensorrtExecutionProvider":
-            # Check if ONNX patching is enabled - if so, modify cache path to avoid conflicts
-            patch_enabled = os.getenv("INFINITY_PATCH_ONNX_POSITION_IDS", "0").lower() in ("1", "true", "yes")
-            cache_suffix = "_int64_patched" if patch_enabled else ""
             
             base_opts: dict[str, Any] = {
                 "trt_fp16_enable": True,
                 "trt_layer_norm_fp32_fallback": True,
                 "trt_cuda_graph_enable": True,  # helps small layers
                 "trt_builder_optimization_level": 3,  # select between 3-5
-                # Engine caching (safe defaults) - use separate cache for patched models
+                # Enhanced engine caching
                 "trt_engine_cache_enable": True,
-                "trt_engine_cache_path": (Path.home() / ".cache" / f"infinity_trt_engines{cache_suffix}").as_posix(),
+                # Additional optimizations for faster startup
+                "trt_timing_cache_enable": True,
             }
         else:
             # NvTensorRTRTXExecutionProvider
+            # Note: paths must be relative for security (absolute paths are rejected)
             base_opts = {
                 "enable_cuda_graph": True,
+                # Engine caching for RTX provider - must use relative paths
+                "engine_cache_path": "cache/engines",
+                "engine_cache_prefix": "infinity_",
+                # Timing cache for faster builds - must use relative paths
+                "timing_cache_path": "cache/timing",
+                # Additional optimizations
+                "enable_build_heuristics": True,
+                "weight_stripped_engine_enable": True,
             }
         if provider_options:
             base_opts.update(provider_options)

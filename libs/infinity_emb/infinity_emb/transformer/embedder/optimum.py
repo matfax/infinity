@@ -157,12 +157,21 @@ class OptimumEmbedder(BaseEmbedder):
         """If ONNX declares input_ids, attention_mask, or position_ids not as INT64, optionally patch them.
         Enable via env INFINITY_PATCH_ONNX_POSITION_IDS=1/true/yes.
         
-        If a patched INT64 version already exists, prioritize it over the original.
+        When INFINITY_PATCH_ONNX_POSITION_IDS=0 (default), skips inspection entirely for faster startup
+        since no patching will be done anyway. If a patched INT64 version already exists, prioritize it.
         """
         try:
             import onnx  # type: ignore
             from onnx import TensorProto  # type: ignore
         except Exception:
+            return onnx_path
+
+        # Check if patching is enabled
+        patch_enabled = os.getenv("INFINITY_PATCH_ONNX_POSITION_IDS", "0").lower() in ("1", "true", "yes")
+        
+        # If patching is disabled, skip the expensive inspection entirely
+        if not patch_enabled:
+            logger.info(f"[infinity] Skipping ONNX inspection (INFINITY_PATCH_ONNX_POSITION_IDS=0), using original: {onnx_path}")
             return onnx_path
 
         try:
