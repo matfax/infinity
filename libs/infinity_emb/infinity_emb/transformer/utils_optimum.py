@@ -216,11 +216,11 @@ def optimize_model(
                 "enable_cuda_graph": True,
                 # Engine caching for RTX provider - must use relative paths
                 "nv_engine_cache_enable": True,
-                "nv_engine_cache_path": ".cache/engines",
+                "nv_engine_cache_path": "/app/.cache/engines",
                 "nv_engine_cache_prefix": "infinity_trt-rtx_",
                 # Timing cache for faster builds - must use relative paths
                 "nv_timing_cache_enable": True,
-                "nv_timing_cache_path": ".cache/timing",
+                "nv_timing_cache_path": "/app/.cache/timing",
                 # Weight stripping for RTX provider (folder-based loading)
                 "nv_weight_stripped_engine_enable": True,
             }
