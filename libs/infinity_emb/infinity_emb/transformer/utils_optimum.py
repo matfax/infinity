@@ -212,6 +212,8 @@ def optimize_model(
                 # Timing cache for faster builds - must use relative paths
                 "nv_timing_cache_enable": True,
                 "nv_timing_cache_path": ".cache/timing",
+                # Weight stripping for RTX provider (folder-based loading)
+                "nv_weight_stripped_engine_enable": True,
             }
         if provider_options:
             base_opts.update(provider_options)
