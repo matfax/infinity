@@ -203,6 +203,11 @@ def optimize_model(
         # Get weight stripping setting from environment variable (default to True)
         weight_stripped_enable = os.getenv("INFINITY_TENSORRT_WEIGHT_STRIPPED", "true").lower() in ("true", "1", "yes", "on")
         
+        # Get cache paths from environment variables
+        engine_cache_path = os.getenv("INFINITY_TENSORRT_ENGINE_CACHE_PATH", ".cache/engines")
+        timing_cache_path = os.getenv("INFINITY_TENSORRT_TIMING_CACHE_PATH", ".cache/timing")
+        cache_prefix = os.getenv("INFINITY_TENSORRT_CACHE_PREFIX", "infinity_trt_")
+        
         if execution_provider == "TensorrtExecutionProvider":
             
             base_opts: dict[str, Any] = {
@@ -214,25 +219,28 @@ def optimize_model(
                 "trt_engine_cache_enable": True,
                 # Additional optimizations for faster startup
                 "trt_timing_cache_enable": True,
-                "trt_engine_cache_path": ".cache/engines",
-                "trt_timing_cache_path": ".cache/timing",
-                "trt_cache_prefix": "infinity_trt_",
+                "trt_engine_cache_path": engine_cache_path,  # configurable via env var
+                "trt_timing_cache_path": timing_cache_path,  # configurable via env var
+                "trt_cache_prefix": cache_prefix,  # configurable via env var
                 "trt_weight_stripped_engine_enable": weight_stripped_enable,  # configurable via env var
             }
         else:
             # NvTensorRTRTXExecutionProvider
             # Note: paths must be relative for security (absolute paths are rejected)
+            # Use RTX-specific prefix for differentiation
+            rtx_cache_prefix = os.getenv("INFINITY_TENSORRT_CACHE_PREFIX", "infinity_trt-rtx_")
+            
             base_opts = {
                 "enable_cuda_graph": cuda_graph_enable,  # configurable via env var
                 # Builder optimization level - configurable via env var
                 "nv_builder_optimization_level": optimization_level,
                 # Engine caching for RTX provider - must use relative paths
                 "nv_engine_cache_enable": True,
-                "nv_engine_cache_path": ".cache/engines",
-                "nv_engine_cache_prefix": "infinity_trt-rtx_",
+                "nv_engine_cache_path": engine_cache_path,  # configurable via env var
+                "nv_engine_cache_prefix": rtx_cache_prefix,  # configurable via env var
                 # Timing cache for faster builds - must use relative paths
                 "nv_timing_cache_enable": True,
-                "nv_timing_cache_path": ".cache/timing",
+                "nv_timing_cache_path": timing_cache_path,  # configurable via env var
                 # Weight stripping for RTX provider (folder-based loading)
                 "nv_weight_stripped_engine_enable": weight_stripped_enable,  # configurable via env var
             }
