@@ -203,6 +203,10 @@ def optimize_model(
         # Get weight stripping setting from environment variable (default to True)
         weight_stripped_enable = os.getenv("INFINITY_TENSORRT_WEIGHT_STRIPPED", "true").lower() in ("true", "1", "yes", "on")
         
+        # Get cache enable/disable settings from environment variables (default to True)
+        engine_cache_enable = os.getenv("INFINITY_TENSORRT_ENGINE_CACHE_ENABLE", "true").lower() in ("true", "1", "yes", "on")
+        timing_cache_enable = os.getenv("INFINITY_TENSORRT_TIMING_CACHE_ENABLE", "true").lower() in ("true", "1", "yes", "on")
+        
         # Get cache paths from environment variables
         engine_cache_path = os.getenv("INFINITY_TENSORRT_ENGINE_CACHE_PATH", ".cache/engines")
         timing_cache_path = os.getenv("INFINITY_TENSORRT_TIMING_CACHE_PATH", ".cache/timing")
@@ -216,9 +220,9 @@ def optimize_model(
                 "trt_cuda_graph_enable": cuda_graph_enable,  # configurable via env var
                 "trt_builder_optimization_level": optimization_level,  # configurable via env var
                 # Enhanced engine caching
-                "trt_engine_cache_enable": True,
+                "trt_engine_cache_enable": engine_cache_enable,  # configurable via env var
                 # Additional optimizations for faster startup
-                "trt_timing_cache_enable": True,
+                "trt_timing_cache_enable": timing_cache_enable,  # configurable via env var
                 "trt_engine_cache_path": engine_cache_path,  # configurable via env var
                 "trt_timing_cache_path": timing_cache_path,  # configurable via env var
                 "trt_cache_prefix": cache_prefix,  # configurable via env var
@@ -235,11 +239,11 @@ def optimize_model(
                 # Builder optimization level - configurable via env var
                 "nv_builder_optimization_level": optimization_level,
                 # Engine caching for RTX provider - must use relative paths
-                "nv_engine_cache_enable": True,
+                "nv_engine_cache_enable": engine_cache_enable,  # configurable via env var
                 "nv_engine_cache_path": engine_cache_path,  # configurable via env var
                 "nv_engine_cache_prefix": rtx_cache_prefix,  # configurable via env var
                 # Timing cache for faster builds - must use relative paths
-                "nv_timing_cache_enable": True,
+                "nv_timing_cache_enable": timing_cache_enable,  # configurable via env var
                 "nv_timing_cache_path": timing_cache_path,  # configurable via env var
                 # Weight stripping for RTX provider (folder-based loading)
                 "nv_weight_stripped_engine_enable": weight_stripped_enable,  # configurable via env var
