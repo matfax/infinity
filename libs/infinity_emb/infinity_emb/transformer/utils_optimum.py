@@ -42,7 +42,18 @@ def cls_token_pooling(model_output, *args):
 
 def normalize(input_array, p=2, dim=1, eps=1e-12):
     # Calculate the Lp norm along the specified dimension
-    norm = np.linalg.norm(input_array, ord=p, axis=dim, keepdims=True)
+    # Use float64 for intermediate calculations to prevent overflow
+    input_float64 = input_array.astype(np.float64)
+    
+    # Suppress overflow warnings and handle them gracefully
+    with np.errstate(over='ignore', invalid='ignore'):
+        norm = np.linalg.norm(input_float64, ord=p, axis=dim, keepdims=True)
+    
+    # Handle potential inf/nan values from overflow
+    norm = np.where(np.isfinite(norm), norm, 1.0)
+    
+    # Convert back to original dtype for final calculation
+    norm = norm.astype(input_array.dtype)
     
     # Use np.divide with where parameter to handle division safely
     # Where norm > eps: perform normal division
