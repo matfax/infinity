@@ -367,6 +367,7 @@ def get_onnx_files(
     revision: Union[str, None] = None,
     use_auth_token: Union[bool, str] = True,
     prefer_quantized=False,
+    onnx_filename: Optional[str] = None,
 ) -> Path:
     """gets the onnx files from the repo"""
     repo_files = _list_all_repo_files(
@@ -377,10 +378,23 @@ def get_onnx_files(
     pattern = "**.onnx"
     onnx_files = [p for p in repo_files if p.match(pattern)]
 
+    if not onnx_files:
+        raise ValueError(f"No onnx files found for {model_name_or_path} and revision {revision}")
+
+    if onnx_filename:
+        for f in onnx_files:
+            if f.name == onnx_filename:
+                logger.info(f"Using specified onnx file: {f}")
+                return f
+        raise ValueError(
+            f"Specified onnx_filename '{onnx_filename}' not found in repo. "
+            f"Available files: {[f.name for f in onnx_files]}"
+        )
+
     prefered_regex = "quantize" if prefer_quantized else "model.onnx"
     prefered_onnx = [f for f in onnx_files if prefered_regex in f.name]
     if len(onnx_files) > 1:
-        logger.info(f"Found {len(onnx_files)} onnx files: {onnx_files}")
+        logger.info(f"Found {len(onnx_files)} onnx files: {[f.name for f in onnx_files]}")
         if prefered_onnx:
             onnx_files = prefered_onnx
         onnx_file = onnx_files[-1]
@@ -389,4 +403,5 @@ def get_onnx_files(
     elif len(onnx_files) == 1:
         return onnx_files[0]
     else:
+        # This case is already covered by the initial check, but kept for safety.
         raise ValueError(f"No onnx files found for {model_name_or_path} and revision {revision}")

@@ -61,6 +61,7 @@ class OptimumEmbedder(BaseEmbedder):
             revision=engine_args.revision,
             use_auth_token=True,
             prefer_quantized=("cpu" in provider.lower() or "openvino" in provider.lower()),
+            onnx_filename=engine_args.onnx_filename,
         )
         # Optionally patch ONNX so position_ids is declared as INT64 (needed by TensorRT)
         original_onnx_file = onnx_file

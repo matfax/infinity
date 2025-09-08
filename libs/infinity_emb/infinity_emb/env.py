@@ -260,5 +260,9 @@ class __Infinity_EnvManager:
     def embedding_dtype(self) -> list[str]:
         return self._typed_multiple("embedding_dtype", EmbeddingDtype)
 
+    @cached_property
+    def onnx_filename(self) -> list[str]:
+        return self._optional_infinity_var_multiple("onnx_filename", default=[""])        
+
 
 MANAGER = __Infinity_EnvManager()

@@ -49,6 +49,7 @@ class OptimumCrossEncoder(BaseCrossEncoder):
             revision=engine_args.revision,
             use_auth_token=True,
             prefer_quantized=("cpu" in provider.lower() or "openvino" in provider.lower()),
+            onnx_filename=engine_args.onnx_filename,
         )
 
         provider_options = None
