@@ -180,6 +180,7 @@ def optimize_model(
     revision: Optional[str] = None,
     trust_remote_code: bool = True,
     provider_options: Optional[dict[str, Any]] = None,
+    subfolder: str = "",
 ) -> "OptimizedModel":
     """
     Optimizes, and then loads the model to work best with the execution provider.
@@ -192,6 +193,7 @@ def optimize_model(
         optimize_model (bool, optional): Whether to optimize the model. Defaults to False.
         revision (Optional[str], optional): The revision to use. Defaults to None.
         trust_remote_code (bool, optional): Whether to trust the remote code. Defaults to True.
+        subfolder (str, optional): The subfolder to use. Defaults to "".
     """
 
     ## If there is no need for optimization
@@ -202,6 +204,7 @@ def optimize_model(
             trust_remote_code=trust_remote_code,
             provider=execution_provider,
             file_name=file_name,
+            subfolder=subfolder,
         )
         # Default provider options, caller can override/extend via provider_options
         # Get optimization level from environment variable (default to 3, valid range 1-5)
@@ -381,14 +384,18 @@ def get_onnx_files(
     if not onnx_files:
         raise ValueError(f"No onnx files found for {model_name_or_path} and revision {revision}")
 
-    if onnx_filename:
+    if onnx_filename and onnx_filename.strip():
+        # If onnx_filename is provided, search for the exact match.
+        # This can be a full path-like string (e.g., "onnx/model.onnx") or just a filename.
         for f in onnx_files:
-            if f.name == onnx_filename:
+            # Match against the full path-like representation or just the filename
+            if f.as_posix() == onnx_filename.strip() or f.name == onnx_filename.strip():
                 logger.info(f"Using specified onnx file: {f}")
                 return f
+        # If no match is found, raise an error
         raise ValueError(
             f"Specified onnx_filename '{onnx_filename}' not found in repo. "
-            f"Available files: {[f.name for f in onnx_files]}"
+            f"Available files: {[f.as_posix() for f in onnx_files]}"
         )
 
     prefered_regex = "quantize" if prefer_quantized else "model.onnx"

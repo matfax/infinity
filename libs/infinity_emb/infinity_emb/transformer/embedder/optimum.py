@@ -135,6 +135,7 @@ class OptimumEmbedder(BaseEmbedder):
             ),  # TODO: make this env variable public
             model_class=ORTModelForFeatureExtraction,
             provider_options=provider_options,
+            subfolder=Path(file_name_for_load).parent.as_posix(),
         )
         self.model.use_io_binding = False
 
