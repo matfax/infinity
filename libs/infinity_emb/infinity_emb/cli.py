@@ -270,6 +270,13 @@ if CHECK_TYPER.is_available:
             **_construct("proxy_root_path"),
             help="Proxy prefix for the application. See: https://fastapi.tiangolo.com/advanced/behind-a-proxy/",
         ),
+        onnx_filename: list[str] = typer.Option(
+            [""],
+            help="filename of the onnx model in the repo, e.g. `onnx/model.onnx`."
+            "If not provided, the last file with .onnx is chosen",
+            rich_help_panel="CLI-Arguments",
+            envvar=MANAGER.to_name("onnx_filename"),
+        ),
     ):
         """Infinity API ♾️  cli v2. MIT License. Copyright (c) 2023-now Michael Feil \n
         \n
@@ -330,6 +337,7 @@ if CHECK_TYPER.is_available:
             compile=compile,
             bettertransformer=bettertransformer,
             served_model_name=served_model_name,
+            onnx_filename=onnx_filename,
         )
 
         engine_args = []
